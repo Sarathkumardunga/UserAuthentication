@@ -9,6 +9,7 @@ const app = express();
 require('./db');
 const User = require('./MODELS/UserSchema');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 
 app.use(bodyParser.json());
@@ -51,6 +52,42 @@ app.post('/register', async (req, res) => {
     }
     catch(err){
         res.status(500).json({message: err.message})
+    }
+});
+
+// Create Login API. Way to token generation
+app.post('/login', async (req, res) => {
+    try {
+        const {email, password} = req.body;
+
+        //Checking if user exists
+        const existingUser = await User.findOne({email});
+        if(!existingUser) {
+            return res.status(401).json({message : 'Invalid credentials'});
+        }
+
+        // If user exists, ask the bcrypt to compare the password
+        // from the body and the password stored in the database
+        const isPasswordMatch = await bcrypt.compare(password, existingUser.password);
+
+        if(!isPasswordMatch) {
+            return res.status(401).json({message : 'Invalid credentials'});
+        }
+
+        //If matched we need to create a token(with three unique values)
+        // Token  - header.payload.signature
+        // u need to send parametres - id from monogoDb, the secret key in .env file
+        const token = jwt.sign({id : existingUser._id}, process.env.JWT_SECRET_KEY, {
+            expiresIn : '1h'
+        });
+        
+        res.status(200).json({
+            token,
+            message : 'user logged in successfully'
+        });
+    }
+    catch(err) {
+        res.status(500).json({message : err.message});
     }
 });
 
