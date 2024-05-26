@@ -15,6 +15,40 @@ const jwt = require('jsonwebtoken');
 app.use(bodyParser.json());
 app.use(cors());
 
+// Whenever an login api is called,
+// Creating a middleware to verify the token generated
+// Middleware is smth which is called whenever u make a request
+function authenicateToken(req, res, next) {
+    const token = req.headers.authorization.split(' ')[1];
+    const { id } = req.body;
+    //console.log('token', token);
+
+    if(!token) {
+        return res.status(401).json({
+            message : 'Auth Error'
+        });
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+        if(id && decoded.id !== id) {
+            return res.status(401).json({
+                message : 'Auth Error'
+            })
+        }
+
+        req.id = decoded;
+        next();
+    }
+    catch(err) {
+        console.log(err);
+        return res.status(500).json({
+            message : 'Invalid Token'
+        });
+    }
+}
+
+
 app.get('/', (req, res) => {
     res.send('The API is working fine.');
 });
@@ -90,6 +124,15 @@ app.post('/login', async (req, res) => {
         res.status(500).json({message : err.message});
     }
 });
+
+//Create API to get my profile
+app.get('/getmyprofile', authenicateToken, async (req, res) => {
+    const { id } = req.body;
+    const user = await User.findById(id);
+    //To hide the password
+    user.password = undefined;
+    res.status(200).json({user});
+})
 
 app.listen(PORT, (req, res) => {
     console.log(`Server is running on PORT ${PORT}`);
