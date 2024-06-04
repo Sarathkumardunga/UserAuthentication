@@ -24,27 +24,36 @@ function authenicateToken(req, res, next) {
     //console.log('token', token);
 
     if(!token) {
-        return res.status(401).json({
-            message : 'Auth Error'
-        });
+        const error = new Error("Token not found");
+        next(error);
+
+        // return res.status(401).json({
+        //     message : 'Auth Error'
+        // });
     }
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
         if(id && decoded.id !== id) {
-            return res.status(401).json({
-                message : 'Auth Error'
-            })
+            const error = new Error('Auth Error');
+            next(error);
+
+            // return res.status(401).json({
+            //     message : 'Auth Error'
+            // })
         }
 
         req.id = decoded;
         next();
     }
     catch(err) {
-        console.log(err);
-        return res.status(500).json({
-            message : 'Invalid Token'
-        });
+        // console.log(err);
+        // return res.status(500).json({
+        //     message : 'Invalid Token'
+        // });
+
+        //calling the above error handling using the middle ware
+        next(err);
     }
 }
 
@@ -60,6 +69,7 @@ app.post('/register', async (req, res) => {
         const existingUser = await User.findOne({email});
 
         if(existingUser) {
+            //This error can also be implemented through error middleware
             return res.status(409).json({message : 'Email already exists'});
         }
 
@@ -85,7 +95,8 @@ app.post('/register', async (req, res) => {
         });
     }
     catch(err){
-        res.status(500).json({message: err.message})
+        next(err);
+        //res.status(500).json({message: err.message})
     }
 });
 
@@ -111,17 +122,29 @@ app.post('/login', async (req, res) => {
         //If matched we need to create a token(with three unique values)
         // Token  - header.payload.signature
         // u need to send parametres - id from monogoDb, the secret key in .env file
-        const token = jwt.sign({id : existingUser._id}, process.env.JWT_SECRET_KEY, {
-            expiresIn : '1h'
+        const accessToken = jwt.sign({id: existingUser._id}, process.env.JWT_SECRET_KEY, {
+            expiresIn : 20
         });
         
+        const refreshToken = jwt.sign({id: existingUser._id}, process.env.JWT_REFRESH_SECRET_KEY);
+        //We want to store this in the frontend via backend 
+
+        existingUser.refreshToken = refreshToken;
+        //Save the refresh Token in the backend
+        await existingUser.save();
+
+        //Store the refreshToken in the frontend part of the cookies
+        res.cookie('refreshToken', refreshToken, {httpOnly: true, path: '/refresh_token'})
+
         res.status(200).json({
-            token,
+            accessToken,
+            refreshToken,
             message : 'user logged in successfully'
         });
     }
     catch(err) {
-        res.status(500).json({message : err.message});
+        next(err);
+        //res.status(500).json({message : err.message});
     }
 });
 
@@ -132,6 +155,12 @@ app.get('/getmyprofile', authenicateToken, async (req, res) => {
     //To hide the password
     user.password = undefined;
     res.status(200).json({user});
+})
+
+//ERROR HANDLING MIDDLEWARE
+app.use((err, req, res, next) => {
+    console.log('error middleware called ', err);
+    res.status(500).json({ message: err.message });
 })
 
 app.listen(PORT, (req, res) => {
