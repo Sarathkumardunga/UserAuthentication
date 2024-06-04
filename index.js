@@ -10,10 +10,12 @@ require('./db');
 const User = require('./MODELS/UserSchema');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
 
 
 app.use(bodyParser.json());
 app.use(cors());
+app.use(cookieParser());
 
 // Whenever an login api is called,
 // Creating a middleware to verify the token generated
@@ -63,7 +65,7 @@ app.get('/', (req, res) => {
 });
 
 //Create register API
-app.post('/register', async (req, res) => {
+app.post('/register', async (req, res, next) => {
     try{ 
         const {name, password, email, age, gender} = req.body;
         const existingUser = await User.findOne({email});
@@ -101,7 +103,7 @@ app.post('/register', async (req, res) => {
 });
 
 // Create Login API. Way to token generation
-app.post('/login', async (req, res) => {
+app.post('/login', async (req, res, next) => {
     try {
         const {email, password} = req.body;
 
@@ -123,7 +125,7 @@ app.post('/login', async (req, res) => {
         // Token  - header.payload.signature
         // u need to send parametres - id from monogoDb, the secret key in .env file
         const accessToken = jwt.sign({id: existingUser._id}, process.env.JWT_SECRET_KEY, {
-            expiresIn : 20
+            expiresIn : '1hr'
         });
         
         const refreshToken = jwt.sign({id: existingUser._id}, process.env.JWT_REFRESH_SECRET_KEY);
@@ -134,7 +136,7 @@ app.post('/login', async (req, res) => {
         await existingUser.save();
 
         //Store the refreshToken in the frontend part of the cookies
-        res.cookie('refreshToken', refreshToken, {httpOnly: true, path: '/refresh_token'})
+        res.cookie('refreshToken', refreshToken, {httpOnly: true, path: '/refresh_token'});
 
         res.status(200).json({
             accessToken,
@@ -148,13 +150,70 @@ app.post('/login', async (req, res) => {
     }
 });
 
-//Create API to get my profile
-app.get('/getmyprofile', authenicateToken, async (req, res) => {
-    const { id } = req.body;
-    const user = await User.findById(id);
-    //To hide the password
-    user.password = undefined;
-    res.status(200).json({user});
+// Create API to get my profile
+app.get('/getmyprofile', authenicateToken, async (req, res, next) => {
+    try {
+        const { id } = req.body;
+        const user = await User.findById(id);
+        if (!user) {
+            return next(new Error('User not found'));
+        }
+        user.password = undefined;
+        res.status(200).json({ user });
+    } catch (err) {
+        next(err);
+    }
+});
+
+//API to generate a access token through refresh token.
+app.get('/refresh_token', async(req, res, next) => {
+    //For storing the cookies, u dont need any cookie parser.
+    //But to access the cookie u need cookie parser
+
+    const token = req.cookies.refreshToken;
+    //res.send(token);
+
+    if(!token) {
+        const error = new Error("Token not found");
+        next(error);
+    }
+
+    jwt.verify(token, process.env.JWT_REFRESH_SECRET_KEY, async (err, decoded) => {
+        if(err) {
+            const error = new Error("Invalid token");
+            next(error);
+        }
+
+        //We have stored an id when generating the refresh token. Get that id
+        const id = decoded.id;
+        const existingUser = await User.findById(id);
+
+        if(!existingUser || token !== existingUser.refreshToken) {
+            const error = new ErrorEvent("Invalid Token");
+            next(error);
+        }
+        
+        //If everything is fine, generate a new access token
+        const accessToken = jwt.sign({ id: existingUser._id }, process.env.JWT_SECRET_KEY, {
+            expiresIn: '1hr'
+        });
+
+        const refreshToken = jwt.sign({id: existingUser._id}, process.env.JWT_REFRESH_SECRET_KEY);
+        //We want to store this in the frontend via backend 
+
+        existingUser.refreshToken = refreshToken;
+        //Save the refresh Token in the backend
+        await existingUser.save();
+
+        //Store the refreshToken in the frontend part of the cookies
+        res.cookie('refreshToken', refreshToken, {httpOnly: true, path: '/refresh_token'});
+
+        res.status(200).json({
+            accessToken,
+            refreshToken,
+            message : 'Token refreshed successfully'
+        });
+    })
 })
 
 //ERROR HANDLING MIDDLEWARE
